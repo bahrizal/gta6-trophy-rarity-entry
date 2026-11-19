@@ -221,8 +221,8 @@ def refresh_stats(series, at):
     the last 24 hours only: early in a launch the logit steps are
     enormous (a rate moving from 0.00% to 1% is four logit), and
     letting those set the typical step would pretend every refresh
-    still moves the rate that far. Where the last day holds no step,
-    the whole series stands in.
+    still moves the rate that far. Where the last day holds fewer
+    than two steps, the whole series stands in.
     """
     signed = []
     absolute = []
@@ -233,7 +233,13 @@ def refresh_stats(series, at):
         step = logit(cur) - logit(prev)
         signed.append(step)
         absolute.append(abs(step))
-    if not signed:
+    if len(signed) < 2:
+        # Fewer than two steps in the last day is noise, not a
+        # typical step: a median of one refresh rests the whole
+        # drift on a single jump. Fall back to the whole series so
+        # the typical step is measured over more than one refresh.
+        signed = []
+        absolute = []
         for (_, prev), (_, cur) in zip(series, series[1:]):
             step = logit(cur) - logit(prev)
             signed.append(step)
@@ -371,10 +377,12 @@ def forecast_trophy(series, at, target, horizon_days, global_step,
     # Family 1: persistence. Its fit is measured like the others':
     # how well a constant at the last rate explains the history. A
     # trophy that has been rising is not explained by staying put,
-    # and the weight says so.
+    # and the weight says so -- and neither is its spread: the
+    # family's own misfit widens the interval it quotes, so a
+    # rising trophy does not get a narrow band around a flat median.
     pers_mse = (sum((logit(r) - last_logit) ** 2 for (_, r) in series)
                 / len(series))
-    families = [(last_logit, math.sqrt(rw_var), pers_mse)]
+    families = [(last_logit, math.sqrt(rw_var + pers_mse), pers_mse)]
 
     # Family 2: the log-time line over the last 24 hours of distinct
     # values, widening the window until it holds enough to trust.
